@@ -1,0 +1,15 @@
+{
+  "week_key": "2026-W15",
+  "completed_days": {
+    "Montag": true
+  },
+  "active_layers": [
+    "brust_vorne",
+    "schulter_hinten",
+    "schulter_vorne",
+    "sideabs_hinten",
+    "sideabs_vorne",
+    "tricep_hinten",
+    "tricep_vorne"
+  ]
+}
