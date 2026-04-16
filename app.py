@@ -1023,7 +1023,6 @@ def home():
 def body_image():
     return send_file(compose_body_image(), mimetype="image/png")
 
-
 @app.route("/training/<tag>")
 def training(tag):
     if tag not in PLAN_DATA:
@@ -1064,8 +1063,16 @@ def training(tag):
 
         hidden_inputs = []
         for set_index, set_values in enumerate(sets, start=1):
-            hidden_inputs.append(f'<input type="hidden" name="rounds_{exercise["id"]}_{set_index}" id="rounds_{exercise["id"]}_{set_index - 1}" value="{set_values.get("rounds", exercise["default_rounds"])}">')
-            hidden_inputs.append(f'<input type="hidden" name="weight_{exercise["id"]}_{set_index}" id="weight_{exercise["id"]}_{set_index - 1}" value="{set_values.get("weight", 0.0)}">')
+            hidden_inputs.append(
+                f'<input type="hidden" name="rounds_{exercise["id"]}_{set_index}" '
+                f'id="rounds_{exercise["id"]}_{set_index - 1}" '
+                f'value="{set_values.get("rounds", exercise["default_rounds"])}">'
+            )
+            hidden_inputs.append(
+                f'<input type="hidden" name="weight_{exercise["id"]}_{set_index}" '
+                f'id="weight_{exercise["id"]}_{set_index - 1}" '
+                f'value="{set_values.get("weight", 0.0)}">'
+            )
 
         exercise_html.append(f"""
         <div class="exercise-block" data-exercise-id="{exercise["id"]}" draggable="true">
@@ -1106,9 +1113,17 @@ def training(tag):
             {''.join(exercise_html)}
             <div class="save-note" id="save_note">Änderungen werden automatisch gespeichert.</div>
 
-            <p>
-                <button class="green" style="display:inline-block; width:auto; padding:14px 20px;" type="submit">
+            <p style="display:flex; gap:10px; flex-wrap:wrap;">
+                <button class="green" style="display:inline-block; width:auto; padding:14px 20px;" type="submit" id="finishTrainingBtn">
                     ✅ FERTIG MIT TRAINING
+                </button>
+
+                <button class="orange" style="display:inline-block; width:auto; padding:14px 20px;" type="button" onclick="stopTimerManually()">
+                    ⏸ TIMER STOPPEN
+                </button>
+
+                <button class="red" style="display:inline-block; width:auto; padding:14px 20px;" type="button" onclick="resetTimerManually()">
+                    🔄 TIMER AUF 00:00
                 </button>
             </p>
 
@@ -1121,9 +1136,18 @@ def training(tag):
     </div>
 
     <script>
-        let savedSeconds = localStorage.getItem("training_seconds");
-let seconds = savedSeconds ? parseInt(savedSeconds) : 0;
+        const trainingTag = {tag!r};
+        const timerStorageKey = 'training_seconds_' + trainingTag;
+        const timerRunningKey = 'training_running_' + trainingTag;
+        const lastActivityKey = 'training_last_activity_' + trainingTag;
+        const inactivityLimitMs = 10 * 60 * 1000;
+
+        let savedSeconds = localStorage.getItem(timerStorageKey);
+        let seconds = savedSeconds ? parseInt(savedSeconds, 10) : 0;
+        let timerInterval = null;
+        let timerRunning = localStorage.getItem(timerRunningKey) === 'true';
         let saveTimeout = null;
+        let autoFinishTriggered = false;
 
         function formatTime(totalSeconds) {{
             const mins = Math.floor(totalSeconds / 60);
@@ -1131,14 +1155,65 @@ let seconds = savedSeconds ? parseInt(savedSeconds) : 0;
             return String(mins).padStart(2, '0') + ':' + String(secs).padStart(2, '0');
         }}
 
-        function tickTimer() {{
-    seconds += 1;
-    document.getElementById('timer').textContent = formatTime(seconds);
-    document.getElementById('duration_seconds').value = String(seconds);
-    localStorage.setItem("training_seconds", seconds);
-}}
+        function persistTimerState() {{
+            localStorage.setItem(timerStorageKey, String(seconds));
+            localStorage.setItem(timerRunningKey, timerRunning ? 'true' : 'false');
+        }}
 
-        setInterval(tickTimer, 1000);
+        function updateTimerDisplay() {{
+            document.getElementById('timer').textContent = formatTime(seconds);
+            document.getElementById('duration_seconds').value = String(seconds);
+        }}
+
+        function startTimer() {{
+            if (timerInterval) {{
+                return;
+            }}
+
+            timerRunning = true;
+            persistTimerState();
+
+            timerInterval = setInterval(function() {{
+                seconds += 1;
+                updateTimerDisplay();
+                persistTimerState();
+            }}, 1000);
+        }}
+
+        function stopTimer() {{
+            if (timerInterval) {{
+                clearInterval(timerInterval);
+                timerInterval = null;
+            }}
+            timerRunning = false;
+            persistTimerState();
+        }}
+
+        function resetTimer() {{
+            stopTimer();
+            seconds = 0;
+            updateTimerDisplay();
+            persistTimerState();
+        }}
+
+        function stopTimerManually() {{
+            stopTimer();
+            const note = document.getElementById('save_note');
+            note.textContent = 'Timer gestoppt.';
+        }}
+
+        function resetTimerManually() {{
+            resetTimer();
+            const note = document.getElementById('save_note');
+            note.textContent = 'Timer auf 00:00 gesetzt.';
+        }}
+
+        function markActivity() {{
+            localStorage.setItem(lastActivityKey, String(Date.now()));
+            if (!timerRunning) {{
+                startTimer();
+            }}
+        }}
 
         function displayWeight(value) {{
             return value.toFixed(1).replace('.', ',');
@@ -1153,6 +1228,7 @@ let seconds = savedSeconds ? parseInt(savedSeconds) : 0;
             if (display) {{
                 display.textContent = String(value);
             }}
+            markActivity();
             queueSave();
         }}
 
@@ -1165,6 +1241,7 @@ let seconds = savedSeconds ? parseInt(savedSeconds) : 0;
             if (display) {{
                 display.textContent = displayWeight(value);
             }}
+            markActivity();
             queueSave();
         }}
 
@@ -1191,6 +1268,7 @@ let seconds = savedSeconds ? parseInt(savedSeconds) : 0;
         }}
 
         function saveOrder() {{
+            markActivity();
             const note = document.getElementById('save_note');
             note.textContent = 'Reihenfolge gespeichert ...';
 
@@ -1242,6 +1320,7 @@ let seconds = savedSeconds ? parseInt(savedSeconds) : 0;
 
             form.querySelectorAll('[data-exercise-id]').forEach(function(block) {{
                 block.addEventListener('dragstart', function() {{
+                    markActivity();
                     draggedBlock = block;
                     block.classList.add('dragging');
                 }});
@@ -1271,6 +1350,7 @@ let seconds = savedSeconds ? parseInt(savedSeconds) : 0;
 
                 block.addEventListener('drop', function(event) {{
                     event.preventDefault();
+                    markActivity();
                     block.classList.remove('drag-over');
                     if (!draggedBlock || draggedBlock === block) {{
                         return;
@@ -1318,15 +1398,63 @@ let seconds = savedSeconds ? parseInt(savedSeconds) : 0;
             }}, 250);
         }}
 
+        function autoFinishTraining() {{
+            if (autoFinishTriggered) {{
+                return;
+            }}
+            autoFinishTriggered = true;
+
+            const note = document.getElementById('save_note');
+            note.textContent = '10 Minuten keine Aktivität – Training wird automatisch gespeichert ...';
+
+            stopTimer();
+            updateTimerDisplay();
+
+            setTimeout(function() {{
+                document.getElementById('trainingForm').requestSubmit();
+            }}, 400);
+        }}
+
+        function checkInactivity() {{
+            const lastActivity = parseInt(localStorage.getItem(lastActivityKey) || '0', 10);
+            if (!lastActivity || !timerRunning) {{
+                return;
+            }}
+
+            const now = Date.now();
+            if (now - lastActivity >= inactivityLimitMs) {{
+                autoFinishTraining();
+            }}
+        }}
+
         document.getElementById('trainingForm').addEventListener('submit', function() {{
+            stopTimer();
+            updateTimerDisplay();
             document.getElementById('duration_seconds').value = String(seconds);
+            localStorage.removeItem(timerStorageKey);
+            localStorage.removeItem(timerRunningKey);
+            localStorage.removeItem(lastActivityKey);
         }});
 
+        ['click', 'input', 'change', 'keydown', 'mousemove', 'touchstart'].forEach(function(eventName) {{
+            document.addEventListener(eventName, function() {{
+                markActivity();
+            }}, {{ passive: true }});
+        }});
+
+        updateTimerDisplay();
         initDragAndDrop();
+
+        if (timerRunning) {{
+            startTimer();
+        }} else {{
+            markActivity();
+        }}
+
+        setInterval(checkInactivity, 5000);
     </script>
     """
     return html_page(f"{tag} Training", content)
-
 
 @app.route("/save_training_values/<tag>", methods=["POST"])
 def save_training_values(tag):
@@ -1440,6 +1568,8 @@ def history():
 def history_trainingsverlauf():
     if "user_id" not in session:
         return redirect(url_for("login"))
+
+    print("SESSION USER ID:", session.get("user_id"))
 
     entries = load_history_entries()
 
